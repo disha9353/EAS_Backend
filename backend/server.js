@@ -46,23 +46,23 @@ app.use(
 );
 
 // -------------------------------------------------------------
-// 🌐 CORS Configuration
+// 🌐 UPDATED CORS CONFIGURATION (FINAL)
 // -------------------------------------------------------------
+const allowedOrigins = [
+  "http://localhost:3000",
+  "http://localhost:5173",
+  process.env.FRONTEND_URL,
+  "https://eas-frontend-kff1ryml8-gowdadisha7-gmailcoms-projects.vercel.app",
+  "https://eas-frontend.vercel.app"
+].filter(Boolean);
+
 const corsOptions = {
   origin: function (origin, callback) {
     if (!origin) return callback(null, true);
-
-    const allowed = [
-      'http://localhost:3000',
-      'http://localhost:5173',
-      process.env.FRONTEND_URL,
-    ].filter(Boolean);
-
-    if (allowed.includes(origin) || process.env.NODE_ENV !== 'production') {
-      callback(null, true);
-    } else {
-      callback(new Error('Not allowed by CORS'));
+    if (allowedOrigins.includes(origin)) {
+      return callback(null, true);
     }
+    return callback(new Error("Not allowed by CORS"));
   },
   credentials: true,
   optionsSuccessStatus: 200,
@@ -83,7 +83,7 @@ app.use('/api/uploads', express.static(path.join(__dirname, 'uploads')));
 app.use('/api/uploads/leaves', express.static(path.join(__dirname, 'uploads/leaves')));
 
 // -------------------------------------------------------------
-// 🟢 Root Route (Fixes Route Not Found / Issue)
+// 🟢 Root Route
 // -------------------------------------------------------------
 app.get('/', (req, res) => {
   res.json({
@@ -117,7 +117,7 @@ app.get('/api/health', (req, res) => {
 });
 
 // -------------------------------------------------------------
-// ❌ 404 Handler (Must be after routes)
+// ❌ 404 Handler
 // -------------------------------------------------------------
 const errorHandler = require('./middleware/errorHandler');
 app.use(errorHandler);
