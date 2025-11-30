@@ -1,5 +1,10 @@
 // Global error handler middleware
 const errorHandler = (err, req, res, next) => {
+  // Don't handle CORS errors - let CORS middleware handle them
+  if (err.message && err.message.includes('CORS')) {
+    return next(err);
+  }
+
   let error = { ...err };
   error.message = err.message;
 
