@@ -277,7 +277,7 @@ router.get('/my-leaves', protect, async (req, res) => {
 router.get('/balance', protect, async (req, res) => {
   try {
     const currentYear = new Date().getFullYear();
-    const balances = await LeaveBalance.find({ 
+    let balances = await LeaveBalance.find({ 
       userId: req.user._id, 
       year: currentYear 
     })
@@ -286,41 +286,94 @@ router.get('/balance', protect, async (req, res) => {
 
     // If no balances exist, create default ones
     if (balances.length === 0) {
+      console.log(`No leave balances found for user ${req.user._id} for year ${currentYear}. Creating default balances...`);
+      
       const leaveTypes = await LeaveType.find({ isActive: true });
+      
       if (leaveTypes.length === 0) {
+        console.log('No active leave types found in database');
         return res.json({ 
+          success: false,
           balances: [],
-          message: 'No leave types configured. Please contact administrator.' 
+          message: 'No leave types configured. Please contact administrator to set up leave types.' 
         });
       }
+      
+      console.log(`Found ${leaveTypes.length} active leave types. Creating balances...`);
       
       const createdBalances = [];
       for (const leaveType of leaveTypes) {
-        const newBalance = await LeaveBalance.create({
-          userId: req.user._id,
-          leaveType: leaveType._id,
-          year: currentYear,
-          totalAllocated: leaveType.yearlyQuota || 0,
-          used: 0,
-          pending: 0,
-          balance: leaveType.yearlyQuota || 0,
-        });
-        createdBalances.push(newBalance);
+        try {
+          // Check if balance already exists (race condition protection)
+          let balance = await LeaveBalance.findOne({
+            userId: req.user._id,
+            leaveType: leaveType._id,
+            year: currentYear
+          });
+
+          if (!balance) {
+            // Don't set balance directly - let the pre-save hook calculate it
+            balance = await LeaveBalance.create({
+              userId: req.user._id,
+              leaveType: leaveType._id,
+              year: currentYear,
+              totalAllocated: leaveType.yearlyQuota || 0,
+              used: 0,
+              pending: 0,
+              carriedForward: 0,
+              // balance will be calculated by pre-save hook
+            });
+            console.log(`Created leave balance for ${leaveType.name}: ${balance.balance} days`);
+            createdBalances.push(balance);
+          } else {
+            console.log(`Leave balance already exists for ${leaveType.name}`);
+            createdBalances.push(balance);
+          }
+        } catch (createError) {
+          // Handle duplicate key errors (race condition)
+          if (createError.code === 11000) {
+            console.log(`Balance already exists for ${leaveType.name} (duplicate key error)`);
+            balance = await LeaveBalance.findOne({
+              userId: req.user._id,
+              leaveType: leaveType._id,
+              year: currentYear
+            });
+            if (balance) createdBalances.push(balance);
+          } else {
+            console.error(`Error creating balance for ${leaveType.name}:`, createError);
+            throw createError;
+          }
+        }
       }
       
-      const updatedBalances = await LeaveBalance.find({ 
+      // Fetch updated balances with populated leaveType
+      balances = await LeaveBalance.find({ 
         userId: req.user._id, 
         year: currentYear 
       })
         .populate('leaveType', 'name code colorCode yearlyQuota')
         .sort({ 'leaveType.name': 1 });
-      return res.json({ balances: updatedBalances });
+      
+      console.log(`Successfully created/fetched ${balances.length} leave balances`);
+      return res.json({ 
+        success: true,
+        balances,
+        message: balances.length > 0 ? 'Leave balances loaded successfully' : 'No leave balances available'
+      });
     }
 
-    res.json({ balances });
+    res.json({ 
+      success: true,
+      balances,
+      message: 'Leave balances loaded successfully'
+    });
   } catch (error) {
     console.error('Get leave balance error:', error);
-    res.status(500).json({ message: 'Server error', error: error.message });
+    res.status(500).json({ 
+      success: false,
+      message: 'Server error while fetching leave balance', 
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
+    });
   }
 });
 
