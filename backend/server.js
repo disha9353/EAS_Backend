@@ -10,6 +10,9 @@ dotenv.config();
 
 const app = express();
 
+// Trust proxy - Required when behind a reverse proxy (like Render)
+app.set('trust proxy', true);
+
 // Security Middleware
 app.use(helmet());
 
@@ -65,16 +68,9 @@ const corsOptions = {
       return callback(null, true);
     }
     
-    // Allow Vercel preview URLs (if FRONTEND_URL contains vercel.app)
-    if (process.env.FRONTEND_URL && origin.includes('vercel.app')) {
-      // Check if it's a Vercel URL (main domain or preview)
-      const frontendDomain = new URL(process.env.FRONTEND_URL).hostname;
-      const originDomain = new URL(origin).hostname;
-      
-      // Allow if it's the same base domain (handles preview URLs)
-      if (originDomain.includes('vercel.app') && frontendDomain.includes('vercel.app')) {
-        return callback(null, true);
-      }
+    // Allow all Vercel preview URLs (more permissive for preview deployments)
+    if (origin.includes('vercel.app')) {
+      return callback(null, true);
     }
     
     // Log for debugging
@@ -96,6 +92,21 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 const path = require('path');
 app.use('/api/uploads', express.static(path.join(__dirname, 'uploads')));
 app.use('/api/uploads/leaves', express.static(path.join(__dirname, 'uploads/leaves')));
+
+// Root route
+app.get('/', (req, res) => {
+  res.json({ 
+    message: 'Employee Attendance System API',
+    status: 'OK',
+    version: '1.0.0',
+    endpoints: {
+      health: '/api/health',
+      auth: '/api/auth',
+      attendance: '/api/attendance',
+      dashboard: '/api/dashboard'
+    }
+  });
+});
 
 // Routes
 app.use('/api/auth', require('./routes/auth'));
