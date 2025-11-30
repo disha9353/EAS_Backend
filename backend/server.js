@@ -5,97 +5,99 @@ const dotenv = require('dotenv');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const morgan = require('morgan');
-const path = require('path');
 
 dotenv.config();
 
 const app = express();
 
-// -------------------------------------------------------------
-// 🛡 Security Middleware
-// -------------------------------------------------------------
+// Security Middleware
 app.use(helmet());
 
-// Rate Limiting (general)
+// Rate Limiting
 const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 100,
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 100, // limit each IP to 100 requests per windowMs
   message: 'Too many requests from this IP, please try again later.',
   standardHeaders: true,
   legacyHeaders: false,
 });
+
 app.use('/api/', limiter);
 
-// Rate Limiting (Auth Routes)
+// Stricter rate limiting for auth routes
 const authLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 5,
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 5, // limit each IP to 5 requests per windowMs
   message: 'Too many login attempts, please try again later.',
   skipSuccessfulRequests: true,
 });
+
 app.use('/api/auth/login', authLimiter);
 app.use('/api/auth/register', authLimiter);
 
-// -------------------------------------------------------------
-// 📜 Logging
-// -------------------------------------------------------------
-app.use(
-  process.env.NODE_ENV === 'development'
-    ? morgan('dev')
-    : morgan('combined')
-);
+// Request Logging
+if (process.env.NODE_ENV === 'development') {
+  app.use(morgan('dev'));
+} else {
+  app.use(morgan('combined'));
+}
 
-// -------------------------------------------------------------
-// 🌐 UPDATED CORS CONFIGURATION (FINAL)
-// -------------------------------------------------------------
-const allowedOrigins = [
-  "http://localhost:3000",
-  "http://localhost:5173",
-  process.env.FRONTEND_URL,
-  "https://eas-frontend-kff1ryml8-gowdadisha7-gmailcoms-projects.vercel.app",
-  "https://eas-frontend.vercel.app"
-].filter(Boolean);
-
+// CORS configuration for production
 const corsOptions = {
   origin: function (origin, callback) {
+    // Allow requests with no origin (like mobile apps or curl requests)
     if (!origin) return callback(null, true);
-    if (allowedOrigins.includes(origin)) {
+    
+    // List of allowed origins
+    const allowedOrigins = [
+      'http://localhost:3000',
+      'http://localhost:5173', // Vite dev server
+      process.env.FRONTEND_URL, // Production frontend URL
+    ].filter(Boolean); // Remove undefined values
+    
+    // In development, allow all origins
+    if (process.env.NODE_ENV !== 'production') {
       return callback(null, true);
     }
-    return callback(new Error("Not allowed by CORS"));
+    
+    // Check if origin matches allowed origins
+    if (allowedOrigins.indexOf(origin) !== -1) {
+      return callback(null, true);
+    }
+    
+    // Allow Vercel preview URLs (if FRONTEND_URL contains vercel.app)
+    if (process.env.FRONTEND_URL && origin.includes('vercel.app')) {
+      // Check if it's a Vercel URL (main domain or preview)
+      const frontendDomain = new URL(process.env.FRONTEND_URL).hostname;
+      const originDomain = new URL(origin).hostname;
+      
+      // Allow if it's the same base domain (handles preview URLs)
+      if (originDomain.includes('vercel.app') && frontendDomain.includes('vercel.app')) {
+        return callback(null, true);
+      }
+    }
+    
+    // Log for debugging
+    console.log('CORS blocked origin:', origin);
+    console.log('Allowed origins:', allowedOrigins);
+    callback(new Error('Not allowed by CORS'));
   },
   credentials: true,
-  optionsSuccessStatus: 200,
+  optionsSuccessStatus: 200
 };
 
 app.use(cors(corsOptions));
 
-// -------------------------------------------------------------
-// 📝 Body Parsers
-// -------------------------------------------------------------
+// Body Parser Middleware
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// -------------------------------------------------------------
-// 📁 Static File Serving
-// -------------------------------------------------------------
+// Serve static files from uploads directory
+const path = require('path');
 app.use('/api/uploads', express.static(path.join(__dirname, 'uploads')));
 app.use('/api/uploads/leaves', express.static(path.join(__dirname, 'uploads/leaves')));
 
-// -------------------------------------------------------------
-// 🟢 Root Route
-// -------------------------------------------------------------
-app.get('/', (req, res) => {
-  res.json({
-    success: true,
-    message: 'Backend Running Successfully 🚀',
-    timestamp: new Date().toISOString(),
-  });
-});
-
-// -------------------------------------------------------------
-// 🚀 API Routes
-// -------------------------------------------------------------
+// Routes
 app.use('/api/auth', require('./routes/auth'));
 app.use('/api/attendance', require('./routes/attendance'));
 app.use('/api/dashboard', require('./routes/dashboard'));
@@ -106,42 +108,39 @@ app.use('/api/leave-types', require('./routes/leaveTypes'));
 app.use('/api/notifications', require('./routes/notifications'));
 app.use('/api/leave-analytics', require('./routes/leaveAnalytics'));
 
-// Health Check
+// Health check
 app.get('/api/health', (req, res) => {
-  res.json({
-    status: 'OK',
+  res.json({ 
+    status: 'OK', 
     message: 'Server is running',
     timestamp: new Date().toISOString(),
-    environment: process.env.NODE_ENV || 'development',
+    environment: process.env.NODE_ENV || 'development'
   });
 });
 
-// -------------------------------------------------------------
-// ❌ 404 Handler
-// -------------------------------------------------------------
+// Error Handler Middleware (must be after routes)
 const errorHandler = require('./middleware/errorHandler');
 app.use(errorHandler);
 
-app.use((req, res) => {
+// 404 Handler
+app.use((req, res, next) => {
   res.status(404).json({
     success: false,
     error: 'Route not found',
-    path: req.originalUrl,
+    path: req.originalUrl
   });
 });
 
-// -------------------------------------------------------------
-// 🔗 MongoDB + Start Server
-// -------------------------------------------------------------
+// Connect to MongoDB
 const connectDB = async () => {
   try {
-    const conn = await mongoose.connect(
-      process.env.MONGODB_URI || 'mongodb://localhost:27017/employee_attendance',
-      { useNewUrlParser: true, useUnifiedTopology: true }
-    );
+    const conn = await mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/employee_attendance', {
+      useNewUrlParser: true,
+      useUnifiedTopology: true,
+    });
 
     console.log(`✅ MongoDB Connected: ${conn.connection.host}`);
-
+    
     const PORT = process.env.PORT || 5000;
     const server = app.listen(PORT, () => {
       console.log(`🚀 Server running on port ${PORT} in ${process.env.NODE_ENV || 'development'} mode`);
@@ -150,7 +149,13 @@ const connectDB = async () => {
     // Handle server errors
     server.on('error', (err) => {
       if (err.code === 'EADDRINUSE') {
-        console.error(`❌ Port ${PORT} is already in use!`);
+        console.error(`\n❌ Port ${PORT} is already in use!`);
+        console.error(`\nTo fix this, you can:`);
+        console.error(`1. Kill the process using port ${PORT}:`);
+        console.error(`   Windows: netstat -ano | findstr :${PORT}`);
+        console.error(`   Then: taskkill /PID <PID> /F`);
+        console.error(`2. Or change PORT in .env file to a different port (e.g., 5001)`);
+        console.error(`3. Or restart your terminal/IDE\n`);
         process.exit(1);
       } else {
         console.error('Server error:', err);
@@ -160,12 +165,16 @@ const connectDB = async () => {
 
     // Graceful shutdown
     process.on('SIGTERM', () => {
+      console.log('SIGTERM signal received: closing HTTP server');
       server.close(() => {
+        console.log('HTTP server closed');
         mongoose.connection.close(false, () => {
+          console.log('MongoDB connection closed');
           process.exit(0);
         });
       });
     });
+
   } catch (err) {
     console.error('❌ MongoDB connection error:', err.message);
     process.exit(1);
@@ -175,3 +184,4 @@ const connectDB = async () => {
 connectDB();
 
 module.exports = app;
+
